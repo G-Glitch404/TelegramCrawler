@@ -30,6 +30,7 @@ class CrawlChannelRequest(BaseModel):
 class TelegramMessage(BaseModel):
     message_id: str
     community: str
+    unique_id: str
     author: Optional[str] = None
     created_at: dt.datetime
     text: str
