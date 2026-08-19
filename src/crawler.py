@@ -197,3 +197,7 @@ class TelegramCrawler:
                 stop_date=stop_date,
             )
         ]
+
+
+if __name__ == '__main__':
+    _client.start()
