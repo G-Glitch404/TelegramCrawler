@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from fastapi import WebSocket, WebSocketDisconnect
 
-from src.main import TelegramCrawler
+from src.crawler import TelegramCrawler
 from src.items import (
     TelegramMessage,
     CrawlChannelRequest,
