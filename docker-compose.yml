@@ -1,0 +1,48 @@
+services:
+  telegram-crawler:
+    container_name: telegram-crawler
+    restart: unless-stopped
+    stop_grace_period: 30s
+    image: localhost/telegram-crawler:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - ./.env
+    environment:
+      TZ: UTC
+      HOST: 0.0.0.0
+      PORT: 9097
+      MAX_CONCURRENT_CRAWLS: ${MAX_CONCURRENT_CRAWLS:-2}
+      DEFAULT_TIMEOUT_SECONDS: ${DEFAULT_TIMEOUT_SECONDS:-180}
+      TELEGRAM_APP_ID: ${TELEGRAM_APP_ID}
+      TELEGRAM_API_HASH: ${TELEGRAM_API_HASH}
+      TELEGRAM_SESSION_PATH: ${TELEGRAM_SESSION_PATH:-/app/session/telegram_crawler.session}
+    ports:
+      - "${PORT:-9097}:9097"
+    networks:
+      - crawlers-network
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+    volumes:
+      - telegram_session:/app/session
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "curl",
+          "-fsS",
+          "http://localhost:9097/health"
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  telegram_session:
+
+networks:
+  crawlers-network:
+    external: true
