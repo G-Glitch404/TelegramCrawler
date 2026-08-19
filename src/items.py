@@ -28,12 +28,14 @@ class CrawlChannelRequest(BaseModel):
 
 
 class TelegramMessage(BaseModel):
-    message_id: str
+    message_id: int
     community: str
     unique_id: str
     author: Optional[str] = None
     created_at: dt.datetime
     text: str
+    message_length: int
+    words_count: int
     url: str
     is_forward: bool
     has_media: bool

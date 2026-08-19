@@ -1,10 +1,6 @@
 import os
 import uvicorn
 
-from dotenv import load_dotenv
-
-load_dotenv()
-
 
 def main() -> None:
     """ start the api server """

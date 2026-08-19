@@ -16,7 +16,7 @@ SPACE_RE = re.compile(r"\s+")
 CASHTAG_RE = re.compile(r"\$([A-Za-z][A-Za-z0-9_]{0,31})")
 URL_RE = re.compile(r"https?://[^\s<>\"]+")
 
-TELEGRAM_API_ID = int(os.getenv("TELEGRAM_API_ID", "0"))
+TELEGRAM_API_ID = int(os.getenv("TELEGRAM_APP_ID", "0"))
 TELEGRAM_API_HASH = os.getenv("TELEGRAM_API_HASH", "")
 TELEGRAM_SESSION = os.getenv(
     "TELEGRAM_SESSION",
@@ -24,7 +24,7 @@ TELEGRAM_SESSION = os.getenv(
 )
 
 if not TELEGRAM_API_ID:
-    raise RuntimeError("TELEGRAM_API_ID is not configured")
+    raise RuntimeError("TELEGRAM_APP_ID is not configured")
 
 if not TELEGRAM_API_HASH:
     raise RuntimeError("TELEGRAM_API_HASH is not configured")
@@ -147,7 +147,7 @@ class TelegramCrawler:
             )
 
             mention_weight = min(
-                5.0,
+                4.0,
                 views / 10_000 +
                 forwards / 100 +
                 reactions / 200 +
@@ -161,6 +161,8 @@ class TelegramCrawler:
                 author=getattr(message, "post_author", None),
                 created_at=message.date,
                 text=text,
+                message_length=len(text),
+                words_count=len([word for word in text.split() if len(word) > 3]),
                 url=f"https://t.me/{channel_handle.lstrip('@')}/{message.id}",
                 is_forward=bool(message.fwd_from),
                 has_media=message.media is not None,
