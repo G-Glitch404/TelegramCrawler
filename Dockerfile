@@ -21,10 +21,10 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 COPY pyproject.toml uv.lock /app/
 
 RUN uv sync --locked --no-dev
+RUN mkdir -p /app/session
 
 COPY src /app/src
-
-RUN mkdir -p /app/session
+COPY session /app/session
 
 EXPOSE 9097
 

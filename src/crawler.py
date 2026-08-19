@@ -20,7 +20,7 @@ TELEGRAM_API_ID = int(os.getenv("TELEGRAM_API_ID", "0"))
 TELEGRAM_API_HASH = os.getenv("TELEGRAM_API_HASH", "")
 TELEGRAM_SESSION = os.getenv(
     "TELEGRAM_SESSION",
-    str(Path("/data") / "telegram_crawler.session"),
+    str(Path("/session") / "telegram_crawler.session"),
 )
 
 if not TELEGRAM_API_ID:
