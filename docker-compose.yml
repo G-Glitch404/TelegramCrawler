@@ -8,11 +8,11 @@ services:
       context: .
       dockerfile: Dockerfile
     env_file:
-      - ./.env
+      - .env/.env.prod
     environment:
       TZ: UTC
-      HOST: 0.0.0.0
-      PORT: 9097
+      HOST: ${HOST}
+      PORT: ${PORT}
       MAX_CONCURRENT_CRAWLS: ${MAX_CONCURRENT_CRAWLS:-2}
       DEFAULT_TIMEOUT_SECONDS: ${DEFAULT_TIMEOUT_SECONDS:-180}
       TELEGRAM_APP_ID: ${TELEGRAM_APP_ID}
