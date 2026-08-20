@@ -1,56 +1,84 @@
 # TelegramCrawler
 
-A container-first FastAPI microservice for crawling Telegram channels with Telethon.
+A production-oriented Telegram crawling microservice built around **Telethon + FastAPI**.
 
-TelegramCrawler is designed as a small scraping service that isolates Telegram crawling from the rest of your application. It exposes health, readiness, and channel crawling endpoints and keeps the crawler implementation separate from the HTTP API.
+TelegramCrawler connects to Telegram through an authenticated Telethon session, crawls channel messages from newest to oldest, normalizes and enriches each message, and exposes the results through a small HTTP/WebSocket API.
 
-## Features
+The service is designed to be easy to run locally, straightforward to integrate into other services, and safe to deploy as a persistent Docker service.
 
-- Telegram channel crawling through Telethon
-- FastAPI HTTP API
-- Single channel crawl endpoint
-- WebSocket streaming for real-time message delivery
-- Health and readiness endpoints
-- Configurable crawl concurrency
-- `stop_date` support
-- Message sentiment analysis using VADER
-- Engagement extraction
-- Hashtag, cashtag, contract, and URL extraction
-- Docker-friendly runtime
-- No application logging framework required
-- Shared crawler implementation for HTTP and WebSocket clients
+---
+
+## What It Does
+
+TelegramCrawler turns Telegram channel history into structured data that downstream applications can consume immediately.
+
+For every crawled message, the service can expose:
+
+- Telegram message identity and URL
+- channel/community information
+- author information
+- message text with whitespace normalization
+- creation timestamp
+- forwarded/media flags
+- views, forwards, reactions, and replies
+- combined engagement metrics
+- VADER sentiment score
+- hashtags and cashtags
+- contract-like addresses detected in text
+- URLs found in the message
+- a capped engagement-derived `mention_weight`
+- an `engagement_hash` for detecting engagement changes between crawls
+
+The service supports both **batch REST crawling** and **streaming WebSocket crawling**.
+
+---
 
 ## Architecture
 
 ```text
-Client
-  |
-  +-- GET /health
-  |
-  +-- GET /ready
-  |
-  +-- POST /v1/crawl/channel
-  |
-  +-- WS /v1/ws/crawl/channel
-  |
-  v
-FastAPI
-  |
-  v
-TelegramCrawler
-  |
-  v
-Telethon
-  |
-  v
-Telegram API
+                         ┌──────────────────────────┐
+                         │      Client / Consumer    │
+                         │ curl / Python / service   │
+                         └────────────┬─────────────┘
+                                      │
+                           HTTP / WebSocket
+                                      │
+                         ┌────────────▼─────────────┐
+                         │       FastAPI API         │
+                         │                           │
+                         │  /health                  │
+                         │  /ready                   │
+                         │  /v1/crawl/channel       │
+                         │  /v1/ws/crawl/channel    │
+                         └────────────┬─────────────┘
+                                      │
+                              crawl semaphore
+                                      │
+                         ┌────────────▼─────────────┐
+                         │       Crawler Layer       │
+                         │                           │
+                         │ Telethon shared client    │
+                         │ message extraction       │
+                         │ text normalization       │
+                         │ sentiment analysis       │
+                         │ entity detection         │
+                         │ engagement calculations  │
+                         └────────────┬─────────────┘
+                                      │
+                                Telegram API
+                                      │
+                         ┌────────────▼─────────────┐
+                         │        Telegram           │
+                         └──────────────────────────┘
 ```
 
-The crawler is responsible for Telegram-specific functionality while FastAPI is responsible for request validation, concurrency control, HTTP/WebSocket communication, and response formatting.
+The API layer handles HTTP/WebSocket concerns while Telegram-specific crawling and message processing remain in the crawler layer.
 
-# TelegramCrawler
+---
 
 ## Project Structure
+
+A typical project layout is:
 
 ```text
 TelegramCrawler/
@@ -60,31 +88,82 @@ TelegramCrawler/
 │   ├── crawler.py
 │   ├── items.py
 │   └── main.py
-├── .env
+├── .env/
+│   ├── .env.dev
+│   └── .env.prod
+├── session/
+│   └── telegram_crawler.session
 ├── Dockerfile
+├── docker-compose.yml
 ├── pyproject.toml
+├── uv.lock
+├── pytest.ini
 └── README.md
 ```
 
-## Requirements
+Do not commit secrets or Telegram session files.
 
-You need:
+Recommended `.gitignore` entries:
+
+```gitignore
+.env/
+*.session
+*.session-journal
+session/
+.venv/
+__pycache__/
+.pytest_cache/
+```
+
+---
+
+# Requirements
+
+## Runtime
 
 - Python 3.12+
+- [uv](https://docs.astral.sh/uv/)
+- Docker / Docker Compose for container deployment
 - Telegram API credentials
-- A Telegram session
-- Telethon
+- An authenticated Telethon session file
+
+## Python stack
+
+The application is built around:
+
 - FastAPI
 - Uvicorn
+- Telethon
 - Pydantic
 - `python-dotenv`
 - `vaderSentiment`
+- `httpx` for HTTP integrations/tests
+- `websockets` for WebSocket clients
 
-Telegram API credentials are obtained from Telegram's developer portal.
+Dependencies are defined and locked through `pyproject.toml` and `uv.lock`.
 
-## Environment Variables
+---
 
-Example `.env`:
+# Telegram API Credentials
+
+TelegramCrawler uses a Telethon client and therefore needs Telegram API credentials.
+
+Create your own Telegram application through Telegram's developer tools and obtain:
+
+```text
+TELEGRAM_APP_ID
+TELEGRAM_API_HASH
+```
+
+These values are sensitive. Never commit them to Git or expose them in public logs, source code, screenshots, or container images.
+
+---
+
+# Environment Configuration
+
+TelegramCrawler is environment-driven.
+
+A local development environment can look like:
 
 ```dotenv
 TELEGRAM_APP_ID=12345678
@@ -95,129 +174,134 @@ HOST=0.0.0.0
 PORT=9097
 
 MAX_CONCURRENT_CRAWLS=2
-DEFAULT_TIMEOUT_SECONDS=120
+DEFAULT_TIMEOUT_SECONDS=180
 ```
 
-### `TELEGRAM_APP_ID`
+## Environment Variables
 
-Your Telegram application ID.
+| Variable | Purpose | Example / Default |
+| --- | --- | --- |
+| `TELEGRAM_APP_ID` | Telegram application ID | `12345678` |
+| `TELEGRAM_API_HASH` | Telegram application hash | secret value |
+| `TELEGRAM_SESSION_PATH` | Path to the Telethon session file | `./session/telegram_crawler.session` locally; `/app/session/telegram_crawler.session` in Docker |
+| `HOST` | API bind address | `0.0.0.0` |
+| `PORT` | API port | `9097` |
+| `MAX_CONCURRENT_CRAWLS` | Maximum simultaneous crawl operations | `2` |
+| `DEFAULT_TIMEOUT_SECONDS` | Default application timeout configuration | `180` |
 
-### `TELEGRAM_API_HASH`
+The exact environment files are intentionally outside source control.
 
-Your Telegram application hash.
+---
 
-### `TELEGRAM_SESSION_PATH`
+# The Telethon Session Is Mandatory
 
-Path to the Telethon session file.
+The crawler needs an **authenticated Telethon session**.
 
-The session is important because it stores the authenticated Telegram client state.
+You have two supported ways to obtain it:
 
-### `HOST`
+1. Bring your own existing `.session` file.
+2. Generate one yourself by running `src/crawler.py` with `uv` and explicitly injecting the environment file.
 
-API bind address.
+A session file represents authenticated Telegram client state. Treat it like a credential.
 
-Default:
+## Generate the Session Locally
 
-```text
-0.0.0.0
-```
-
-### `PORT`
-
-API port.
-
-Default:
-
-```text
-9097
-```
-
-### `MAX_CONCURRENT_CRAWLS`
-
-Maximum number of simultaneous crawl operations.
-
-Example:
+Create a development environment file with a writable local session path, for example:
 
 ```dotenv
-MAX_CONCURRENT_CRAWLS=2
+TELEGRAM_APP_ID=12345678
+TELEGRAM_API_HASH=your_api_hash
+TELEGRAM_SESSION_PATH=./session/telegram_crawler.session
 ```
 
-### `DEFAULT_TIMEOUT_SECONDS`
-
-Default timeout used by the API when a request does not specify another timeout.
-
-## Authentication
-
-TelegramCrawler uses a Telethon client.
-
-The crawler creates one shared client:
-
-```python
-_client = TelegramClient(
-    session=...,
-    api_id=settings["TELEGRAM_APP_ID"],
-    api_hash=settings["TELEGRAM_API_HASH"],
-)
-```
-
-The session must already be authenticated before the crawler can access channels that require an authenticated Telegram account.
-
-The first authentication can be performed with Telethon using your Telegram account. Once the session file has been created, the service can reuse it.
-
-Do not commit the session file to Git.
-
-Example `.gitignore`:
-
-```gitignore
-.env
-session/
-*.session
-*.session-journal
-__pycache__/
-.pytest_cache/
-```
-
-## Running the Service
-
-Start the API with:
+Then make sure the session directory exists:
 
 ```bash
-python -m src.main
+mkdir -p session
 ```
 
-The default server is:
+Run the crawler entry point through `uv` and **inject the environment file**:
+
+```bash
+uv run --env-file .env/.env.dev src/crawler.py
+```
+
+> The `--env-file` part is important. It ensures the crawler receives the Telegram credentials and session path from the environment file rather than relying on whatever happens to be exported in your shell.
+
+On first authentication, Telethon will request the information required to authenticate the Telegram account. After successful authentication, the session is stored at the configured `TELEGRAM_SESSION_PATH`.
+
+Once the session exists, the API can reuse it without requiring a new login every time the service starts.
+
+### Verify the session file
+
+For the example configuration:
+
+```bash
+ls -lh session/telegram_crawler.session
+```
+
+If you already have a valid session file, do not regenerate it unnecessarily; point `TELEGRAM_SESSION_PATH` to the existing file instead.
+
+---
+
+# Local Development
+
+## Install / Sync Dependencies
+
+From the project root:
+
+```bash
+uv sync
+```
+
+## Run the API
+
+Use the environment file explicitly:
+
+```bash
+uv run --env-file .env/.env.dev python -m src.main
+```
+
+The API will normally be available at:
 
 ```text
-http://127.0.0.1:9097
+http://localhost:9097
 ```
 
-When bound to `0.0.0.0`, the service listens on all container interfaces.
+Using `uv run` is recommended because it runs the application inside the project's managed environment and keeps dependencies synchronized with the lockfile.
 
-## Main API
+---
 
-The service exposes three HTTP endpoints:
+# API Overview
 
-| Method | Endpoint | Purpose |
+| Method | Endpoint | Description |
 | --- | --- | --- |
-| `GET` | `/health` | Liveness |
-| `GET` | `/ready` | Readiness |
-| `POST` | `/v1/crawl/channel` | Crawl a Telegram channel |
+| `GET` | `/health` | Process/liveness check |
+| `GET` | `/ready` | Telegram readiness and crawl capacity |
+| `POST` | `/v1/crawl/channel` | Crawl a channel and return the full batch |
+| `WS` | `/v1/ws/crawl/channel` | Stream messages as they are discovered |
 
-A WebSocket endpoint is also provided for streaming crawls.
+FastAPI also exposes interactive API documentation:
 
-## Health
+- Swagger UI: `http://localhost:9097/docs`
+- ReDoc: `http://localhost:9097/redoc`
+- OpenAPI JSON: `http://localhost:9097/openapi.json`
 
-### `GET /health`
+---
 
-The health endpoint answers whether the application process is alive.
+# `GET /health`
 
-Example:
+A lightweight liveness endpoint.
+
+It answers whether the application process is alive. It should not perform a Telegram crawl.
+
+## Request
 
 ```bash
 curl http://localhost:9097/health
 ```
 
-Example response:
+## Example Response
 
 ```json
 {
@@ -227,21 +311,23 @@ Example response:
 }
 ```
 
-The health endpoint should remain lightweight and should not perform a Telegram crawl.
+Use this endpoint for basic service checks and container health monitoring.
 
-## Readiness
+---
 
-### `GET /ready`
+# `GET /ready`
 
-The readiness endpoint determines whether the service is ready to perform Telegram operations.
+Readiness is different from liveness.
 
-Example:
+A healthy process can still be unable to crawl Telegram if the Telethon client is disconnected or initialization has failed.
+
+## Request
 
 ```bash
 curl http://localhost:9097/ready
 ```
 
-Example response:
+## Ready Response
 
 ```json
 {
@@ -252,7 +338,7 @@ Example response:
 }
 ```
 
-If the Telegram client is not connected:
+## Not Ready Response
 
 ```json
 {
@@ -263,46 +349,23 @@ If the Telegram client is not connected:
 }
 ```
 
-The readiness endpoint is useful for Docker health checks, orchestration systems, and deployment systems.
+`available_slots` is the current crawl capacity, while `max_concurrent_crawls` is the configured upper bound.
 
-## Crawl Channel
+---
 
-### `POST /v1/crawl/channel`
+# `POST /v1/crawl/channel`
 
-Crawls messages from one Telegram channel.
+The primary REST endpoint.
 
-Example request:
+It crawls one Telegram channel from newest to oldest and returns a complete response after the crawl finishes.
 
-```bash
-curl -X POST http://localhost:9097/v1/crawl/channel   -H "Content-Type: application/json"   -d '{
-    "channel": "examplechannel",
-    "limit": 100,
-    "stop_date": "2026-02-03"
-  }'
-```
-
-The channel can also be supplied with `@`:
-
-```json
-{
-  "channel": "@examplechannel",
-  "limit": 100
-}
-```
-
-The crawler normalizes the channel when constructing Telegram message URLs.
-
-## Crawl Request
-
-The request model contains the crawl parameters.
-
-Example:
+## Request Body
 
 ```json
 {
   "channel": "examplechannel",
   "limit": 100,
-  "stop_date": "2026-02-03"
+  "stop_date": "2026-08-01"
 }
 ```
 
@@ -310,49 +373,88 @@ Example:
 
 Telegram channel handle.
 
-Examples:
+Both forms are accepted:
 
 ```text
 examplechannel
 ```
 
-or:
+and:
 
 ```text
 @examplechannel
 ```
 
+The service normalizes the channel when constructing Telegram message URLs.
+
 ### `limit`
 
-Maximum number of messages to crawl.
+Maximum number of messages to return.
 
 Example:
 
 ```json
 {
-  "limit": 100
+  "channel": "examplechannel",
+  "limit": 25
 }
 ```
 
 ### `stop_date`
 
-Optional date used to stop crawling older messages.
+Optional historical crawl boundary in `YYYY-MM-DD` format.
+
+The crawler starts with recent messages and walks backwards. Once it reaches a message whose date is older than `stop_date`, it stops instead of continuing through older history.
 
 Example:
 
 ```json
 {
-  "stop_date": "2026-02-03"
+  "channel": "examplechannel",
+  "limit": 1000,
+  "stop_date": "2026-08-01"
 }
 ```
 
-The crawler processes messages from newest to oldest. When a message older than the requested date is reached, crawling stops.
+Conceptually:
 
-This prevents unnecessary traversal of older channel history.
+```text
+newest
+  │
+  ├── 2026-08-03  ← crawl
+  ├── 2026-08-02  ← crawl
+  ├── 2026-08-01  ← crawl
+  ├── 2026-07-31  ← older than stop_date → stop
+  │
+  └── older history is not traversed
+```
 
-## Crawl Response
+This makes `stop_date` useful for bounded historical crawls and avoids unnecessarily traversing older messages.
 
-Example:
+## Minimal Request
+
+```bash
+curl -X POST http://localhost:9097/v1/crawl/channel \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "channel": "examplechannel",
+    "limit": 10
+  }'
+```
+
+## Historical Crawl
+
+```bash
+curl -X POST http://localhost:9097/v1/crawl/channel \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "channel": "examplechannel",
+    "limit": 500,
+    "stop_date": "2026-08-01"
+  }'
+```
+
+## Example Response
 
 ```json
 {
@@ -365,18 +467,18 @@ Example:
       "message_id": "examplechannel_12345",
       "community": "examplechannel",
       "author": "Example Channel",
-      "created_at": "2026-02-03T12:30:00+00:00",
-      "text": "Example Telegram message",
+      "created_at": "2026-08-01T12:30:00+00:00",
+      "text": "BTC is breaking out and this looks extremely bullish",
+      "message_length": 51,
+      "words_count": 5,
       "url": "https://t.me/examplechannel/12345",
       "is_forward": false,
       "has_media": false,
-      "needs_processing": true,
       "sentiment_score": 0.4404,
       "engagement_count": 1250,
       "views": 1000,
       "forwards": 100,
       "reactions": 100,
-      "message_length": 24,
       "mention_weight": 1.5,
       "hashtags": [
         "crypto"
@@ -384,7 +486,6 @@ Example:
       "cashtags": [
         "BTC"
       ],
-      "contracts": [],
       "found_urls": [
         "https://example.com"
       ],
@@ -394,176 +495,42 @@ Example:
 }
 ```
 
-## Telegram Message Fields
-
-Each crawled message is represented by the Telegram message model.
-
-### `message_id`
-
-A stable application-level identifier combining the channel handle and Telegram message ID.
-
-Example:
-
-```text
-examplechannel_12345
-```
-
-### `community`
-
-The Telegram channel handle.
-
-Example:
-
-```text
-examplechannel
-```
-
-### `author`
-
-The Telegram post author when Telegram provides one.
-
-### `created_at`
-
-The Telegram message creation timestamp.
-
-### `text`
-
-Normalized message text.
-
-Whitespace is normalized before the message is processed.
-
-### `url`
-
-Direct Telegram message URL.
-
-Example:
-
-```text
-https://t.me/examplechannel/12345
-```
-
-### `is_forward`
-
-Indicates whether the message is a forwarded message.
-
-### `has_media`
-
-Indicates whether the message contains Telegram media.
-
-### `needs_processing`
-
-Indicates that the message is available for downstream processing.
-
-### `sentiment_score`
-
-VADER compound sentiment score.
-
-The score ranges from:
-
-```text
--1.0
-```
-
-to:
-
-```text
-1.0
-```
-
-### `engagement_count`
-
-Combined engagement value calculated from:
-
-```text
-views + forwards + reactions + replies
-```
-
-### `views`
-
-Telegram view count.
-
-### `forwards`
-
-Telegram forward count.
-
-### `reactions`
-
-Total reaction count.
-
-### `message_length`
-
-Length of the normalized message text.
-
-### `mention_weight`
-
-A calculated weight based on the configured channel weight and engagement.
-
-The crawler currently calculates it using:
-
-```text
-channel_weight
-+ views / 10000
-+ forwards / 100
-+ reactions / 200
-+ replies / 50
-```
-
-The result is capped at:
-
-```text
-5.0
-```
-
-### `hashtags`
-
-Hashtags extracted from Telegram message entities.
-
-Example:
-
-```json
-[
-  "bitcoin",
-  "crypto"
-]
-```
-
-### `cashtags`
-
-Cashtags extracted from the message.
-
-Example:
-
-```json
-[
-  "BTC",
-  "ETH"
-]
-```
-
-### `contracts`
-
-Contract-like addresses detected in the message.
-
-### `found_urls`
-
-URLs detected in the message.
-
-### `engagement_hash`
-
-A hash derived from:
-
-```text
-views
-forwards
-reactions
-replies
-```
-
-It can be used to detect whether engagement has changed since a previous crawl.
-
-## Text Normalization
-
-Messages are normalized before processing.
+The values above are illustrative; actual values come from Telegram and the crawler's processing logic.
+
+---
+
+# Telegram Message Schema
+
+Each item in `messages` represents one processed Telegram message.
+
+| Field              | Meaning                                                                                                        |
+|--------------------|----------------------------------------------------------------------------------------------------------------|
+| `message_id`       | Stable application-level identifier combining the channel and Telegram message ID, e.g. `examplechannel_12345` |
+| `community`        | Normalized Telegram channel handle                                                                             |
+| `author`           | Telegram post author when available                                                                            |
+| `created_at`       | Telegram message creation timestamp                                                                            |
+| `text`             | Normalized message text                                                                                        |
+| `message_length`   | Length of normalized message text                                                                              |
+| `words_count`      | amount of words in the message text with more than 3 chars                                                     |
+| `url`              | Direct Telegram message URL                                                                                    |
+| `is_forward`       | Whether the message is a forwarded post                                                                        |
+| `has_media`        | Whether Telegram reports media on the message                                                                  |
+| `sentiment_score`  | VADER compound sentiment score, from `-1.0` to `1.0`                                                           |
+| `engagement_count` | Combined views + forwards + reactions + replies                                                                |
+| `views`            | Telegram view count                                                                                            |
+| `forwards`         | Telegram forward count                                                                                         |
+| `reactions`        | Total reaction count                                                                                           |
+| `mention_weight`   | Engagement-derived weight capped at `5.0`                                                                      |
+| `hashtags`         | Hashtags extracted from Telegram message entities                                                              |
+| `cashtags`         | Cashtags such as `BTC` or `ETH` detected in the message                                                        |
+| `found_urls`       | URLs detected in the message                                                                                   |
+| `engagement_hash`  | Hash representing engagement values and useful for change detection                                            |
+
+---
+
+# Text Normalization
+
+Messages are normalized before downstream processing.
 
 The crawler:
 
@@ -574,41 +541,41 @@ The crawler:
 For example:
 
 ```text
-"BTC    is
-moving   higher"
+BTC    is
+moving   higher
 ```
 
 becomes:
 
 ```text
-"BTC is moving higher"
+BTC is moving higher
 ```
 
-This makes message processing and comparison more stable.
+This makes downstream text processing and message comparisons more stable.
 
-## Sentiment
+---
 
-The crawler uses VADER to calculate sentiment.
+# Sentiment Analysis
 
-Example:
+The crawler uses VADER sentiment analysis.
+
+The `sentiment_score` is the VADER compound score:
 
 ```text
-"BTC is breaking out and this looks extremely bullish"
+-1.0  ← strongly negative
+ 0.0  ← neutral / approximately neutral
++1.0  ← strongly positive
 ```
 
-produces a positive compound score.
+For example, a strongly bullish message can receive a positive compound score, while strongly negative language produces a negative score.
 
-A strongly negative message produces a negative score.
+The raw score is returned in the API response so downstream systems can apply their own thresholds.
 
-Neutral messages produce a score close to zero.
+---
 
-The raw `sentiment_score` is preserved in the response.
+# Engagement Metrics
 
-## Engagement
-
-Telegram messages can expose several engagement metrics.
-
-The crawler extracts:
+The crawler extracts the engagement signals exposed by Telegram, including:
 
 - views
 - forwards
@@ -624,103 +591,81 @@ engagement_count = views + forwards + reactions + replies
 Example:
 
 ```text
-views = 1000
-forwards = 20
+views     = 1000
+forwards  = 20
 reactions = 50
-replies = 10
-```
-
-Results in:
-
-```text
+replies   = 10
+----------------
 engagement_count = 1080
 ```
 
 ## Engagement Hash
 
-The crawler generates a Blake2b hash from the engagement values:
+The crawler generates an engagement hash from the engagement values:
 
 ```text
 views|forwards|reactions|replies
 ```
 
-This allows downstream systems to quickly determine whether engagement has changed.
+The hash can be stored downstream and compared during a later crawl. If the hash changes, one or more engagement values changed.
 
-For example, if a message changes from:
+This is useful when repeatedly crawling the same channel and wanting to detect message engagement updates without treating the entire message as new.
 
-```text
-1000|20|50|10
-```
+---
 
-to:
+# `mention_weight`
 
-```text
-1200|20|55|10
-```
+`mention_weight` is an engagement-derived value that combines a configured channel weight with observed engagement.
 
-the engagement hash changes.
-
-## Stop Date
-
-`stop_date` is an optimization for historical crawling.
-
-Example:
-
-```json
-{
-  "channel": "examplechannel",
-  "limit": 1000,
-  "stop_date": "2026-02-03"
-}
-```
-
-The crawler starts from recent messages and moves backwards.
-
-Once it reaches a message whose date is older than the requested date, the crawler stops.
-
-This is useful when you only want a specific historical window.
-
-For example:
+The current calculation is conceptually:
 
 ```text
-latest message
-      |
-      v
-2026-02-05
-2026-02-04
-2026-02-03
-2026-02-02  <-- stop
+channel_weight
++ views / 10000
++ forwards / 100
++ reactions / 200
++ replies / 50
 ```
 
-The crawler does not continue unnecessarily through older messages.
-
-## WebSocket Streaming
-
-The WebSocket endpoint is intended for clients that want messages as they are discovered instead of waiting for the complete crawl.
-
-Endpoint:
+The resulting value is capped at:
 
 ```text
-WS /v1/ws/crawl/channel
+5.0
 ```
 
-The request is sent as JSON.
+This field is intended as a downstream prioritization signal rather than a raw Telegram metric.
 
-Example:
+---
+
+# WebSocket Streaming API
+
+## `WS /v1/ws/crawl/channel`
+
+The WebSocket endpoint performs the same basic channel-crawling operation but sends messages individually as they are discovered.
+
+This is useful when a consumer should begin processing immediately rather than wait for a potentially large REST response.
+
+## Connection
+
+```text
+ws://localhost:9097/v1/ws/crawl/channel
+```
+
+## Send Crawl Parameters
+
+After connecting, send JSON such as:
 
 ```json
 {
   "channel": "examplechannel",
   "limit": 100,
-  "stop_date": "2026-02-03"
+  "stop_date": "2026-08-01"
 }
 ```
 
-Messages are streamed individually.
+## Item Event
 
-A typical stream contains item messages followed by a completion message.
-
-Example item:
+A message event has the form:
 
 ```json
 {
@@ -733,7 +678,11 @@ Example item:
 }
 ```
 
-Completion:
+The full message object is supplied in `data` by the actual service.
+
+## Completion Event
+
+When the crawl finishes:
 
 ```json
 {
@@ -741,7 +690,9 @@ Completion:
 }
 ```
 
-Error:
+## Error Event
+
+If a streaming crawl fails:
 
 ```json
 {
@@ -750,173 +701,7 @@ Error:
 }
 ```
 
-This design allows downstream applications to process messages immediately instead of waiting for the entire crawl.
-
-## Why WebSockets
-
-The normal POST endpoint behaves as a batch operation:
-
-```text
-request
-   |
-   v
-crawl 100 messages
-   |
-   v
-return 100 messages
-```
-
-The WebSocket endpoint behaves as a stream:
-
-```text
-request
-   |
-   v
-message 1
-   |
-   v
-message 2
-   |
-   v
-message 3
-   |
-   v
-...
-   |
-   v
-done
-```
-
-This is useful for:
-
-- real-time processing
-- downstream sentiment pipelines
-- token detection
-- notifications
-- event processing
-- large crawls where waiting for the entire result is undesirable
-
-## Concurrency
-
-Crawls are protected by a concurrency semaphore.
-
-Example:
-
-```dotenv
-MAX_CONCURRENT_CRAWLS=2
-```
-
-This allows two crawl operations to run simultaneously.
-
-If both slots are occupied, new requests wait for an available slot.
-
-The readiness endpoint exposes the current available slots.
-
-Example:
-
-```json
-{
-  "available_slots": 1,
-  "max_concurrent_crawls": 2
-}
-```
-
-## Error Handling
-
-The API returns HTTP errors when the crawler cannot complete a request.
-
-Example:
-
-```json
-{
-  "detail": "Telegram client is not connected"
-}
-```
-
-A crawl failure is returned as a server-side gateway error because the API itself is available but the external Telegram operation failed.
-
-## Docker
-
-TelegramCrawler is intended to run inside Docker.
-
-Build:
-
-```bash
-docker build -t telegram-crawler .
-```
-
-Run:
-
-```bash
-docker run -d   --name telegram-crawler   -p 9097:9097   --env-file .env   telegram-crawler
-```
-
-Check the service:
-
-```bash
-curl http://localhost:9097/health
-```
-
-Check readiness:
-
-```bash
-curl http://localhost:9097/ready
-```
-
-## Docker Compose
-
-Example:
-
-```yaml
-services:
-  telegram-crawler:
-    build: .
-    container_name: telegram-crawler
-    restart: unless-stopped
-    ports:
-      - "9097:9097"
-    env_file:
-      - .env
-    volumes:
-      - ./session:/app/session
-```
-
-The session directory should be persisted so the Telegram authentication session survives container recreation.
-
-## Docker Health Check
-
-A health check can use the service's health endpoint:
-
-```dockerfile
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3   CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9097/health')"
-```
-
-## API Usage From Python
-
-Example HTTP client:
-
-```python
-import httpx
-
-
-async def crawl_channel() -> dict:
-    """Crawl a Telegram channel."""
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            "http://localhost:9097/v1/crawl/channel",
-            json={
-                "channel": "examplechannel",
-                "limit": 100,
-                "stop_date": "2026-02-03",
-            },
-        )
-        response.raise_for_status()
-        return response.json()
-```
-
-## WebSocket Usage From Python
-
-Example:
+## Python Example
 
 ```python
 import json
@@ -925,7 +710,6 @@ import websockets
 
 
 async def stream_channel() -> None:
-    """Stream Telegram messages."""
     async with websockets.connect(
         "ws://localhost:9097/v1/ws/crawl/channel"
     ) as websocket:
@@ -934,189 +718,568 @@ async def stream_channel() -> None:
                 {
                     "channel": "examplechannel",
                     "limit": 100,
-                    "stop_date": "2026-02-03",
+                    "stop_date": "2026-08-01",
                 }
             )
         )
 
-        async for message in websocket:
-            data = json.loads(message)
+        async for raw_message in websocket:
+            data = json.loads(raw_message)
 
             if data["type"] == "item":
-                print(data["data"])
+                process(data["data"])
             elif data["type"] == "done":
                 break
             elif data["type"] == "error":
                 raise RuntimeError(data["detail"])
 ```
 
-## Why Only One Crawl Endpoint
+---
 
-The API intentionally exposes one crawl operation:
+# REST Client Example
+
+A simple asynchronous Python consumer can use `httpx`:
+
+```python
+import httpx
+
+
+async def crawl_channel() -> dict:
+    async with httpx.AsyncClient(timeout=60) as client:
+        response = await client.post(
+            "http://localhost:9097/v1/crawl/channel",
+            json={
+                "channel": "examplechannel",
+                "limit": 100,
+                "stop_date": "2026-08-01",
+            },
+        )
+        response.raise_for_status()
+        return response.json()
+```
+
+---
+
+# Concurrency
+
+Crawl operations are protected by a concurrency semaphore.
+
+For example:
+
+```dotenv
+MAX_CONCURRENT_CRAWLS=2
+```
+
+allows two crawl operations to run simultaneously.
+
+If all slots are occupied, additional crawl requests wait for an available slot instead of creating an unlimited number of simultaneous Telegram operations.
+
+The current capacity is visible through `/ready`:
+
+```json
+{
+  "status": "ready",
+  "telegram_connected": true,
+  "available_slots": 1,
+  "max_concurrent_crawls": 2
+}
+```
+
+This is particularly useful for orchestration and monitoring.
+
+---
+
+# Docker Deployment
+
+Docker is the recommended production deployment method.
+
+The supplied Docker image uses Python 3.12, `uv`, and Uvicorn and starts the application with:
+
+```text
+uv run uvicorn src.main:app --host 0.0.0.0 --port 9097
+```
+
+The container also uses `tini` as PID 1 and creates `/app/session` for persistent Telethon session storage.
+
+## 1. Prepare the Production Environment File
+
+Create:
+
+```text
+.env/.env.prod
+```
+
+Example:
+
+```dotenv
+TELEGRAM_APP_ID=12345678
+TELEGRAM_API_HASH=your_api_hash
+TELEGRAM_SESSION_PATH=/app/session/telegram_crawler.session
+
+HOST=0.0.0.0
+PORT=9097
+MAX_CONCURRENT_CRAWLS=2
+DEFAULT_TIMEOUT_SECONDS=180
+```
+
+Make sure the session referenced by `TELEGRAM_SESSION_PATH` is available to the container through the persistent Docker volume.
+
+## 2. Make Sure the External Docker Network Exists
+
+The Compose configuration expects an external network called `crawlers-network`.
+
+Create it once if it does not already exist:
+
+```bash
+docker network create crawlers-network
+```
+
+If it already exists, Docker will report that fact; that is fine.
+
+## 3. Build and Start the Service
+
+### Important
+
+The production environment file must be supplied to **Docker Compose itself** for Compose variable interpolation.
+
+Use this exact command:
+
+```bash
+docker compose --env-file .env/.env.prod up -d --build
+```
+
+**Do not put `--env-file` after `up`.** The correct order is:
+
+```text
+docker compose --env-file <env-file> up ...
+             └──────────────┘
+              Compose option
+```
+
+The command above is the canonical production start command for this project.
+
+## Why `--env-file` Matters
+
+Docker Compose has two separate concepts:
+
+1. `env_file:` supplies environment variables to the container.
+2. `--env-file` supplies variables to Compose while it evaluates `${...}` expressions in the Compose file.
+
+For example, the Compose file may contain:
+
+```yaml
+ports:
+  - "${PORT:-9097}:9097"
+```
+
+and:
+
+```yaml
+environment:
+  TELEGRAM_APP_ID: ${TELEGRAM_APP_ID}
+  TELEGRAM_API_HASH: ${TELEGRAM_API_HASH}
+```
+
+Therefore the production file should be explicitly provided to Compose:
+
+```bash
+docker compose --env-file .env/.env.prod up -d --build
+```
+
+This avoids warnings such as:
+
+```text
+The "TELEGRAM_APP_ID" variable is not set.
+The "TELEGRAM_API_HASH" variable is not set.
+The "HOST" variable is not set.
+The "PORT" variable is not set.
+```
+
+---
+
+# Docker Compose Lifecycle
+
+## Start
+
+```bash
+docker compose --env-file .env/.env.prod up -d --build
+```
+
+## Show Containers
+
+```bash
+docker compose ps
+```
+
+## Follow Logs
+
+```bash
+docker compose logs -f telegram-crawler
+```
+
+## Restart
+
+```bash
+docker compose restart telegram-crawler
+```
+
+## Rebuild After Code Changes
+
+```bash
+docker compose --env-file .env/.env.prod up -d --build
+```
+
+## Stop
+
+```bash
+docker compose down
+```
+
+> `down` removes the containers but does not remove named volumes unless explicitly requested. The named `telegram_session` volume is intended to preserve Telegram authentication state across normal container recreation.
+
+## Check Health
+
+```bash
+curl http://localhost:9097/health
+```
+
+## Check Telegram Readiness
+
+```bash
+curl http://localhost:9097/ready
+```
+
+---
+
+# Docker Session Persistence
+
+The Compose deployment mounts the named Docker volume:
+
+```yaml
+volumes:
+  - telegram_session:/app/session
+```
+
+The purpose is to keep the Telethon session outside the disposable application container.
+
+Without persistent storage, destroying and recreating the container could also destroy the session and force Telegram authentication again.
+
+Do not casually delete the session volume in production.
+
+---
+
+# Production Checklist
+
+Before starting a production deployment:
+
+```text
+[ ] Telegram API ID is configured
+[ ] Telegram API hash is configured
+[ ] Authenticated Telethon session exists
+[ ] TELEGRAM_SESSION_PATH is correct
+[ ] .env/.env.prod is not committed to Git
+[ ] crawlers-network exists
+[ ] Docker Compose command uses --env-file before up
+[ ] /health responds successfully
+[ ] /ready reports telegram_connected=true
+[ ] Session storage is persistent
+```
+
+Recommended startup flow:
+
+```text
+Telegram credentials
+        │
+        ▼
+Generate / provide session
+        │
+        ▼
+.env/.env.prod
+        │
+        ▼
+Docker Compose
+        │
+        ▼
+TelegramCrawler
+        │
+        ├── /health
+        ├── /ready
+        ├── REST crawl
+        └── WebSocket crawl
+```
+
+---
+
+# Testing
+
+The integration tests use the running TelegramCrawler API rather than starting the API server themselves.
+
+The test environment can define values such as:
+
+```dotenv
+CRAWLER_BASE_URL=http://localhost:9097
+TEST_TELEGRAM_CHANNEL=examplechannel
+TEST_CRAWL_LIMIT=5
+TEST_STOP_DATE=2026-08-01
+TEST_REQUEST_TIMEOUT=30
+```
+
+Run the tests through `uv`:
+
+```bash
+uv run --env-file .env/.env.test pytest
+```
+
+To run one test file with verbose output:
+
+```bash
+uv run --env-file .env/.env.test pytest tests/test_post_endpoint.py -vv -s
+```
+
+The test suite verifies readiness and the REST crawl contract, including response fields and message structure.
+
+If the integration test is skipped, check that the test environment contains `TEST_TELEGRAM_CHANNEL`.
+
+---
+
+# Common Problems
+
+## Compose says environment variables are not set
+
+If you see warnings such as:
+
+```text
+The "TELEGRAM_APP_ID" variable is not set.
+```
+
+start Compose with the environment file supplied to Compose itself:
+
+```bash
+docker compose --env-file .env/.env.prod up -d --build
+```
+
+## `/health` works but `/ready` is not ready
+
+A healthy API process does not necessarily mean Telegram is available.
+
+Check:
+
+```bash
+curl http://localhost:9097/ready
+```
+
+Then inspect logs:
+
+```bash
+docker compose logs -f telegram-crawler
+```
+
+Common causes are missing Telegram credentials, an invalid/missing session, or Telegram connectivity/authentication problems.
+
+## The session file is not found in Docker
+
+Check the effective environment and confirm that `TELEGRAM_SESSION_PATH` points into the mounted session directory, for example:
+
+```text
+/app/session/telegram_crawler.session
+```
+
+The Compose volume should be mounted at:
+
+```text
+/app/session
+```
+
+## The API returns a crawl error / `502`
+
+A crawl request can fail even when the FastAPI process itself is reachable.
+
+Check `/ready` and the container logs first:
+
+```bash
+curl http://localhost:9097/ready
+docker compose logs -f telegram-crawler
+```
+
+A server-side crawl failure generally indicates a problem with the Telegram operation or message processing path rather than the HTTP client itself.
+
+## Port 9097 is already in use
+
+Either stop the process currently using the port or configure another host port in the Compose environment.
+
+For example:
+
+```dotenv
+PORT=9098
+```
+
+Then restart:
+
+```bash
+docker compose --env-file .env/.env.prod up -d --build
+```
+
+The container itself continues to listen on port `9097`; the configured value controls the published host port in the Compose mapping.
+
+---
+
+# Design Notes
+
+## One Channel Per Crawl Request
+
+The service intentionally uses one primary crawl operation:
 
 ```text
 POST /v1/crawl/channel
 ```
 
-Telegram channel crawling is the core operation.
+Recent crawling, historical crawling, and bounded crawling are represented through request parameters such as `limit` and `stop_date` rather than separate endpoints.
 
-There is no need to create separate endpoints for:
+Multiple channels can be handled by the calling application with multiple requests while the service controls concurrency centrally.
 
-- recent messages
-- historical messages
-- messages by date
-- messages by ID
+## REST vs WebSocket
 
-Those behaviors can be represented through request parameters such as `limit` and `stop_date`.
-
-This keeps the HTTP API small and easier to maintain.
-
-## Should More Channels Be Added?
-
-The current API accepts one channel per crawl request.
-
-That is preferable for the current service design.
-
-Multiple channels can already be handled by the client by making multiple crawl requests.
-
-For example:
+Use REST when the consumer wants one complete result:
 
 ```text
-channel A -> /v1/crawl/channel
-channel B -> /v1/crawl/channel
-channel C -> /v1/crawl/channel
+request → crawl → complete response
 ```
 
-Adding a bulk endpoint such as:
+Use WebSockets when the consumer wants incremental processing:
 
 ```text
-POST /v1/crawl/channels
+request
+  ↓
+item 1
+  ↓
+item 2
+  ↓
+item 3
+  ↓
+...
+  ↓
+done
 ```
 
-would only be worthwhile if the service itself needs to coordinate multiple channels in one operation.
+This distinction is particularly useful for large crawls, real-time downstream pipelines, notifications, token detection, and event processing.
 
-A bulk endpoint would introduce additional concerns:
+## Persistent Authentication State
 
-- per-channel errors
-- concurrency scheduling
-- response aggregation
-- partial failures
-- ordering
-- larger response sizes
-- WebSocket multiplexing
+The Telethon session is deliberately treated as persistent application state. The API container can be replaced while the authenticated session remains available through persistent storage.
 
-For a small crawler microservice, keeping one-channel-per-operation is the simpler design.
+---
 
-## Development
+# Security
 
-Run the application:
-
-```bash
-python -m src.main
-```
-
-Run with a custom port:
-
-```bash
-PORT=9098 python -m src.main
-```
-
-Run with a custom concurrency limit:
-
-```bash
-MAX_CONCURRENT_CRAWLS=4 python -m src.main
-```
-
-## API Documentation
-
-FastAPI automatically provides OpenAPI documentation.
-
-Swagger UI:
+Treat the following as secrets:
 
 ```text
+TELEGRAM_APP_ID
+TELEGRAM_API_HASH
+*.session
+*.session-journal
+```
+
+In particular, the Telethon session should be considered equivalent to an authenticated Telegram client state.
+
+Do not:
+
+- commit `.env/.env.prod`
+- commit session files
+- copy session files into public Docker images
+- paste API hashes or session contents into issue trackers
+- expose the API publicly without appropriate network controls and authentication
+
+If the API is deployed outside a trusted network, put it behind the appropriate reverse proxy, access control, firewall rules, or service-to-service authentication.
+
+---
+
+# Quick Start
+
+For a new deployment, the shortest reliable path is:
+
+### 1. Configure Telegram credentials
+
+```dotenv
+TELEGRAM_APP_ID=...
+TELEGRAM_API_HASH=...
+TELEGRAM_SESSION_PATH=./session/telegram_crawler.session
+```
+
+### 2. Generate the session
+
+```bash
+mkdir -p session
+uv run --env-file .env/.env.dev python3 src.crawler
+```
+
+### 3. Create the Docker network if required
+
+```bash
+docker network create crawlers-network
+```
+
+### 4. Configure production environment
+
+```text
+.env/.env.prod
+```
+
+with a Docker path such as:
+
+```dotenv
+TELEGRAM_SESSION_PATH=/app/session/telegram_crawler.session
+```
+
+### 5. Start production
+
+```bash
+docker compose --env-file .env/.env.prod up -d --build
+```
+
+### 6. Verify
+
+```bash
+curl http://localhost:9097/health
+curl http://localhost:9097/ready
+```
+
+### 7. Crawl a channel
+
+```bash
+curl -X POST http://localhost:9097/v1/crawl/channel \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "channel": "examplechannel",
+    "limit": 10,
+    "stop_date": "2026-08-01"
+  }'
+```
+
+---
+
+# API Documentation at Runtime
+
+When the service is running, the generated API contract is available directly from FastAPI:
+
+```text
+Swagger UI
 http://localhost:9097/docs
 ```
 
-ReDoc:
-
 ```text
+ReDoc
 http://localhost:9097/redoc
 ```
 
-OpenAPI schema:
-
 ```text
+OpenAPI
 http://localhost:9097/openapi.json
 ```
 
-## Design Principles
+These endpoints are the best place to inspect the exact request/response schema exposed by the current build.
 
-TelegramCrawler follows a small set of design principles.
+---
 
-### Keep the API Small
-
-The service exposes only the operations needed to crawl Telegram content.
-
-### Keep Telegram Logic in the Crawler
-
-FastAPI should not contain Telethon-specific extraction logic.
-
-### Keep the Crawler Reusable
-
-The crawler can be used by HTTP and WebSocket handlers without duplicating crawling code.
-
-### Prefer Streaming for Large or Real-Time Workflows
-
-WebSockets allow clients to consume messages as soon as they are discovered.
-
-### Keep REST for Simple Integrations
-
-The POST endpoint remains useful for scripts and clients that want one complete response.
-
-### Keep Authentication State Persistent
-
-The Telethon session should be stored outside the disposable application process.
-
-## Future Improvements
-
-Possible future improvements include:
-
-- channel bulk crawling
-- message ID ranges
-- date ranges with both start and end dates
-- media metadata extraction
-- reply/thread extraction
-- forwarded-message metadata
-- richer reaction information
-- configurable sentiment engines
-- crawl statistics
-- retry handling for transient Telegram failures
-- more granular WebSocket events
-- optional persistent storage
-
-These should only be added when they solve an actual requirement. The current service is intentionally narrow.
-
-## Security
-
-Do not expose the Telegram API credentials publicly.
-
-Do not commit:
-
-```text
-.env
-```
-
-or:
-
-```text
-*.session
-```
-
-to the repository.
-
-The Telegram session effectively represents an authenticated Telegram client and should be treated as sensitive.
-
-When deploying the API publicly, place it behind appropriate network controls and authentication if the service should not be publicly accessible.
-
-## License
+# License
 - MIT
