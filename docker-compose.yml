@@ -1,6 +1,6 @@
 services:
   telegram-crawler:
-    container_name: telegram-crawler
+    container_name: telegram-crawler-app
     restart: unless-stopped
     stop_grace_period: 30s
     image: localhost/telegram-crawler:latest
@@ -17,7 +17,7 @@ services:
       DEFAULT_TIMEOUT_SECONDS: ${DEFAULT_TIMEOUT_SECONDS:-180}
       TELEGRAM_APP_ID: ${TELEGRAM_APP_ID}
       TELEGRAM_API_HASH: ${TELEGRAM_API_HASH}
-      TELEGRAM_SESSION_PATH: ${TELEGRAM_SESSION_PATH:-/app/session/telegram_crawler.session}
+      TELEGRAM_SESSION: ${TELEGRAM_SESSION:-/app/session/telegram_crawler.session}
     ports:
       - "${PORT:-9097}:9097"
     networks:
@@ -26,7 +26,7 @@ services:
       - 8.8.8.8
       - 8.8.4.4
     volumes:
-      - telegram_session:/app/session
+      - ./session:/app/session
     healthcheck:
       test:
         [
@@ -39,9 +39,6 @@ services:
       timeout: 10s
       retries: 5
       start_period: 30s
-
-volumes:
-  telegram_session:
 
 networks:
   crawlers-network:

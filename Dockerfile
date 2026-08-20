@@ -24,9 +24,8 @@ RUN uv sync --locked --no-dev
 RUN mkdir -p /app/session
 
 COPY src /app/src
-COPY session /app/session
 
 EXPOSE 9097
 
 ENTRYPOINT ["tini", "--"]
-CMD ["uv", "run", "uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "9097"]
+CMD ["uv", "run", "uvicorn", "src.api:app", "--host", "0.0.0.0", "--port", "9097"]
