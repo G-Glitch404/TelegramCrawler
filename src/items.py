@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field, field_validator
 
 class CrawlChannelRequest(BaseModel):
     channel: str = Field(min_length=1, max_length=255)
-    limit: int = Field(default=100, ge=1)
+    limit: int = Field(default=100, ge=1, le=10_000)
     stop_date: Optional[dt.datetime] = None
 
     @field_validator("channel")
