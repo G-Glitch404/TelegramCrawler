@@ -68,7 +68,7 @@ class TelegramCrawler:
     @staticmethod
     def _extract_cashtag(text: str) -> str:
         """ extract the most likely symbol from a telegram message """
-        match = CASHTAG_RE.search(text)
+        match: Any = CASHTAG_RE.search(text)
         return match.group(1).upper() if match else ""
 
     async def build_entities(self, channels: Sequence[str]) -> None:
@@ -76,7 +76,7 @@ class TelegramCrawler:
         await self.connect()
         for channel in channels:
             if channel not in self.entities:
-                self.entities[channel] = await _client.get_input_entity(channel)
+                self.entities[channel]: Any = await _client.get_input_entity(channel)
 
     async def fetch_channel(
         self,
@@ -87,13 +87,13 @@ class TelegramCrawler:
         """ fetch and convert telegram channel messages into normalized items """
         await self.build_entities([channel_handle])
 
-        entity = self.entities[channel_handle]
+        entity: Any = self.entities[channel_handle]
         async for message in _client.iter_messages(
             entity,
             reverse=False,
             limit=limit,
         ):
-            message_date = getattr(message, "date", None)
+            message_date: Optional[dt.datetime] = getattr(message, "date", None)
             if stop_date is not None:
                 if not isinstance(message_date, dt.datetime): break
                 if message_date.date() < stop_date.date(): break
@@ -101,11 +101,11 @@ class TelegramCrawler:
             text: str = self._normalize_text(getattr(message, "message", None))
             if not text: continue
 
-            sentiment_score = self.sentiment_analyzer.polarity_scores(text)["compound"]
+            sentiment_score: float = self.sentiment_analyzer.polarity_scores(text)["compound"]
 
             reactions: int = 0
             if message.reactions and getattr(message.reactions, "results", None):
-                reactions = sum(
+                reactions: int = sum(
                     int(result.count or 0)
                     for result in message.reactions.results
                 )
@@ -139,20 +139,22 @@ class TelegramCrawler:
             views: int = int(message.views or 0)
             forwards: int = int(message.forwards or 0)
 
-            engagement_count = (
+            engagement_count: int = (
                 views +
                 forwards +
                 reactions +
                 replies
             )
 
-            mention_weight = min(
+            message_weight: float = min(
                 4.0,
                 views / 10_000 +
                 forwards / 100 +
                 reactions / 200 +
                 replies / 50,
             )
+
+            words: list[str] = [word for word in text.split() if len(word) > 3]
 
             yield TelegramMessage(
                 message_id=message.id,
@@ -162,7 +164,8 @@ class TelegramCrawler:
                 created_at=message.date,
                 text=text,
                 message_length=len(text),
-                words_count=len([word for word in text.split() if len(word) > 3]),
+                words_count=len(words),
+                words_length=len(''.join(words)),
                 url=f"https://t.me/{channel_handle.lstrip('@')}/{message.id}",
                 is_forward=bool(message.fwd_from),
                 has_media=message.media is not None,
@@ -172,14 +175,18 @@ class TelegramCrawler:
                 forwards=forwards,
                 reactions=reactions,
                 replies=replies,
-                mention_weight=mention_weight,
+                message_weight=message_weight,
                 hashtags=hashtags,
                 cashtags=cashtags,
                 found_urls=found_urls,
                 engagement_hash=hashlib.blake2b(
                     f"{views}|{forwards}|{reactions}|{replies}".encode(),
                     digest_size=16,
-                ).hexdigest()
+                ).hexdigest(),
+                content_hash=hashlib.blake2b(
+                    f"{channel_handle}|{message.id}|{text}|{getattr(message, 'post_author', None)}".encode(),
+                    digest_size=16,
+                ).hexdigest(),
             )
 
     async def crawl_channel(

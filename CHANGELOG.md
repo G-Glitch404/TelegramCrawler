@@ -18,6 +18,7 @@ The project follows an **Unreleased-first** changelog style: changes are recorde
 - Added `stop_date` support for bounded historical crawls, with early termination once messages fall outside the requested date boundary.
 - Added configurable crawl concurrency through `MAX_CONCURRENT_CRAWLS`.
 - Added Telegram connection-state validation before crawl operations.
+- Added `words_length`, `content_hash` fields and changed mention_weight -> message_weight
 
 #### HTTP API
 

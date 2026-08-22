@@ -29,13 +29,16 @@ class CrawlChannelRequest(BaseModel):
 
 class TelegramMessage(BaseModel):
     message_id: int
-    community: str
     unique_id: str
+    engagement_hash: str
+    content_hash: str
+    community: str
     author: Optional[str] = None
     created_at: dt.datetime
     text: str
     message_length: int
     words_count: int
+    words_length: int
     url: str
     is_forward: bool
     has_media: bool
@@ -45,11 +48,10 @@ class TelegramMessage(BaseModel):
     forwards: int
     reactions: int
     replies: int
-    mention_weight: float
+    message_weight: float
     hashtags: set[str]
     cashtags: set[str]
     found_urls: set[str]
-    engagement_hash: str
 
 
 class CrawlChannelResponse(BaseModel):

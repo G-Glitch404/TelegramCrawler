@@ -471,6 +471,7 @@ curl -X POST http://localhost:9097/v1/crawl/channel \
       "text": "BTC is breaking out and this looks extremely bullish",
       "message_length": 51,
       "words_count": 5,
+      "words_length": 29,
       "url": "https://t.me/examplechannel/12345",
       "is_forward": false,
       "has_media": false,
@@ -479,7 +480,7 @@ curl -X POST http://localhost:9097/v1/crawl/channel \
       "views": 1000,
       "forwards": 100,
       "reactions": 100,
-      "mention_weight": 1.5,
+      "message_weight": 1.5,
       "hashtags": [
         "crypto"
       ],
@@ -512,6 +513,7 @@ Each item in `messages` represents one processed Telegram message.
 | `text`             | Normalized message text                                                                                        |
 | `message_length`   | Length of normalized message text                                                                              |
 | `words_count`      | amount of words in the message text with more than 3 chars                                                     |
+| `words_length`     | amount of charactars in the found words in the message text with more than 3 chars                             |
 | `url`              | Direct Telegram message URL                                                                                    |
 | `is_forward`       | Whether the message is a forwarded post                                                                        |
 | `has_media`        | Whether Telegram reports media on the message                                                                  |
@@ -520,11 +522,12 @@ Each item in `messages` represents one processed Telegram message.
 | `views`            | Telegram view count                                                                                            |
 | `forwards`         | Telegram forward count                                                                                         |
 | `reactions`        | Total reaction count                                                                                           |
-| `mention_weight`   | Engagement-derived weight capped at `5.0`                                                                      |
+| `message_weight`   | Engagement-derived weight capped at `5.0`                                                                      |
 | `hashtags`         | Hashtags extracted from Telegram message entities                                                              |
 | `cashtags`         | Cashtags such as `BTC` or `ETH` detected in the message                                                        |
 | `found_urls`       | URLs detected in the message                                                                                   |
-| `engagement_hash`  | Hash representing engagement values and useful for change detection                                            |
+| `engagement_hash`  | Hash representing engagement values and useful for engagment metric change detection                           |
+| `content_hash`     | Hash representing content values and useful for text change detection                                          |
 
 ---
 
